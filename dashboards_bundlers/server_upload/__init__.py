@@ -25,6 +25,9 @@ def bundle(handler, abs_nb_path):
     Uploads a notebook to a Jupyter Dashboard Server, either by itself, or
     within a zip file with associated data and widget files
     '''
+
+    cm = handler.application.settings['contents_manager']
+
     # Get name of notebook from filename
     notebook_basename = os.path.basename(abs_nb_path)
     notebook_name = os.path.splitext(notebook_basename)[0]
@@ -33,12 +36,12 @@ def bundle(handler, abs_nb_path):
     tmp_dir = tempfile.mkdtemp()
     try:
         output_dir = os.path.join(tmp_dir, notebook_name)
-        bundled = make_upload_bundle(abs_nb_path, output_dir, handler.tools)
+        bundled = make_upload_bundle(abs_nb_path, output_dir, handler.tools, cm)
         send_file(bundled, notebook_name, handler)
     finally:
         shutil.rmtree(tmp_dir, True)
 
-def make_upload_bundle(abs_nb_path, staging_dir, tools):
+def make_upload_bundle(abs_nb_path, staging_dir, tools, cm=None):
     '''
     Assembles the notebook and resources it needs, returning the path to a
     zip file bundling the notebook and its requirements if there are any,
@@ -53,6 +56,13 @@ def make_upload_bundle(abs_nb_path, staging_dir, tools):
 
     # Include the notebook as index.ipynb to make the final URL cleaner
     # and for consistency
+    if cm and type(cm).__name__ == 'PostgresContentsManager':
+        notebook_basename = os.path.basename(abs_nb_path)
+
+        infile = cm.get('{}'.format(notebook_basename), type='file')
+        with open(abs_nb_path, 'w') as outfile:
+            outfile.write(infile['content'])
+
     shutil.copy2(abs_nb_path, os.path.join(staging_dir, 'index.ipynb'))
     # Include frontend files referenced via the jupyter_cms bundle mechanism
     bundle_file_references(staging_dir, abs_nb_path, tools)
@@ -95,7 +105,7 @@ def send_file(file_path, dashboard_name, handler):
             if token:
                 headers['Authorization'] = 'token {}'.format(token)
             result = requests.post(upload_url, files={'file': file_content},
-                headers=headers, timeout=60, 
+                headers=headers, timeout=60,
                 verify=not skip_ssl_verification())
             if result.status_code >= 400:
                 raise web.HTTPError(result.status_code)
